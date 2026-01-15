@@ -5,8 +5,8 @@ Created on Tue Feb  2 14:48:06 2021
 
 @author: adam
 """
-# from neuron import h
-# h.nrnmpi_init()
+from neuron import h
+h.nrnmpi_init()
 
 from netpyne import sim
 
@@ -20,4 +20,4 @@ sim.createSimulateAnalyze(netParams=netParams, simConfig=simConfig)
 sim.pc.done()
 #import sys
 #sys.exit()
-# h.quit()
+h.quit()

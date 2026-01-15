@@ -24,11 +24,12 @@ asBatch = False
 if asBatch:
    filename1 = dirs1 + '/t42_0' + '.json'
 else:   
-   filename1 = 'model_output.json'
+   filename1 = 'model_output_data.json'
 
 
 
 if os.path.isfile(filename1):
+    print(f"Archivo encontrado: {filename1}. Procesando...")
     with open(filename1) as f:
       data = json.load(f)
       
@@ -64,3 +65,6 @@ if os.path.isfile(filename1):
          plt.savefig(dirs1 + '/traces2' +  '.png', transparent  = True)
       else:
          plt.savefig('traces2' +  '.png', transparent  = True)  
+else:
+    print(f"ERROR: No se encontró el archivo {filename1}")
+    print(f"Archivos presentes en {dirs1}: {os.listdir(dirs1) if os.path.exists(dirs1) else 'Carpeta no existe'}")

@@ -8,8 +8,8 @@ Created on Tue Feb  2 14:34:42 2021
 from netpyne import specs
 from netpyne.batch import Batch
 
-#froam neuron import h
-#h.nrnmpi_init()
+from neuron import h
+h.nrnmpi_init()
 
 def batchTauWeight():
 
@@ -27,7 +27,7 @@ def batchTauWeight():
     b.method = 'grid'
     
     
-    numcores = 10
+    numcores = 8
     doslurm = False
     if doslurm:
     
@@ -55,7 +55,7 @@ def batchTauWeight():
 
     # Run batch simulations
     b.run()
-    #h.quit()
+    h.quit()
 # Main code
 if __name__ == '__main__':
         batchTauWeight()

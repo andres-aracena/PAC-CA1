@@ -236,7 +236,8 @@ if cfg.connectOLMPC and cfg.pyrpopsize>0:
     'synsPerConn': 'int(binomial(int(olmscalenum*13*olm_pc_synfact),olm_pc_conprob))',
     'weight': 'uniform(np_olm_pc_lobound,np_olm_pc_hibound)*np_olm_pc_wei', 
  	'delay': 'uniform(0.5,1)',
-    'sec': OLMsecList
+    'sec': OLMsecList,
+    'connRandomSecFromList': True
      }			
 
 
@@ -251,6 +252,7 @@ if cfg.connectPVBCPC and cfg.pyrpopsize>0:
  	'weight': 'uniform(1,1.2)*np_pv_pc_wei',	
  	'delay': 'uniform(0.5,2)', 				
     'sec': PVBCsecList,
+    'connRandomSecFromList': True
      }			
     
 
@@ -311,107 +313,68 @@ if cfg.artifpyrpars['doartif'] and cfg.artifpyrpars['artifperpyr'] > 0:
 
 
 if cfg.doAlvstim:
-    
     scanz_starttime = cfg.starttime
-    netParams.stimSourceParams['alv_bkg'] = {'type': 'NetStim', 
-                                            'interval': cfg.scanz_fval, 
-                                            'number': cfg.scanz_stimtotnum, 
-                                                'start': scanz_starttime}
+    
+    # Definimos la fuente de estimulación una sola vez
+    netParams.stimSourceParams['alv_bkg'] = {
+        'type': 'NetStim', 
+        'interval': cfg.scanz_fval, 
+        'number': cfg.scanz_stimtotnum, 
+        'start': scanz_starttime
+    }
 
-    if cfg.pvbcpopsize>0:
-
-      
-       netParams.stimTargetParams['PVBC_alv'] = {'source': 'alv_bkg', 'synMech': 'PC-PVBC',
-                                        'conds': {'pop': 'PVBC_pop'},                  
-                                        'weight': 'uniform(0.35,0.63)',
-                                        'delay': 1, 
-                                        'sec': 'basal', 
-                                        'loc': 0.5, 
-                                        'synsPerConn': 6*int(cfg.alv_pv_synfact/4)}
-       
-       netParams.stimTargetParams['PVBC_alv2'] = {'source': 'alv_bkg', 'synMech': 'PC-PVBC',
-                                        'conds': {'pop': 'PVBC_pop'},                  
-                                        'weight': 'uniform(0.35,0.63)',
-                                        'delay': 1, 
-                                        'sec': 'basal', 
-                                        'loc': 0.5, 
-                                        'synsPerConn': 6*int(cfg.alv_pv_synfact/4)}
-           
-       netParams.stimTargetParams['PVBC_alv3'] = {'source': 'alv_bkg', 'synMech': 'PC-PVBC',
-                                        'conds': {'pop': 'PVBC_pop'},                  
-                                        'weight': 'uniform(0.35,0.63)',
-                                        'delay': 1, 
-                                        'sec': 'basal', 
-                                        'loc': 0.5, 
-                                        'synsPerConn': 6*int(cfg.alv_pv_synfact/4)}
-       
-       netParams.stimTargetParams['PVBC_alv4'] = {'source': 'alv_bkg', 'synMech': 'PC-PVBC',
-                                        'conds': {'pop': 'PVBC_pop'},                  
-                                        'weight': 'uniform(0.35,0.63)',
-                                        'delay': 1, 
-                                        'sec': 'basal', 
-                                        'loc': 0.5, 
-                                        'synsPerConn': 6*int(cfg.alv_pv_synfact/4)  + 6*int(cfg.alv_pv_synfact % 4)}
+    # --- POBLACIÓN PVBC ---
+    if cfg.pvbcpopsize > 0:
+        # Calculamos el número total de sinapsis (6 por cada factor)
+        total_pv_syns = int(6 * cfg.alv_pv_synfact)
+        
+        for i in range(total_pv_syns):
+            # Creamos un target individual por cada sinapsis
+            netParams.stimTargetParams[f'PVBC_alv_{i}'] = {
+                'source': 'alv_bkg', 
+                'synMech': 'PC-PVBC',
+                'conds': {'pop': 'PVBC_pop'},                  
+                'weight': 'uniform(0.35,0.63)',
+                'delay': 1, 
+                'sec': 'basal', # Al ser synsPerConn=1, NetPyNE elegirá una sección de la lista basal
+                'loc': 0.5
+            }
                   
-           
-           
-       
+    # --- POBLACIÓN OLM ---        
+    if cfg.olmpopsize > 0:
+        # Calculamos el número total (5 por cada factor)
+        total_olm_syns = int(5 * cfg.alv_olm_synfact)
+        
+        for i in range(total_olm_syns):
+            netParams.stimTargetParams[f'OLM_alv_{i}'] = {
+                'source': 'alv_bkg', 
+                'synMech': 'PC-OLM',
+                'conds': {'pop': 'OLM_pop'},                             
+                'weight': 'uniform(0.275,0.325)',
+                'delay': 1,
+                'sec': 'basal', 
+                'loc': 0.5
+            }
 
-    if cfg.olmpopsize>0:
-  
-       netParams.stimTargetParams['OLM_alv'] = {'source': 'alv_bkg', 'synMech': 'PC-OLM',
-                                                 'conds': {'pop': 'OLM_pop'},							   
-                                                 'weight': 'uniform(0.275,0.325)',
-                                                 'delay': 1,
-                                                 'sec': 'basal', 
-                                                 'loc': 0.5, 
-                                                 'synsPerConn': 5*int(cfg.alv_olm_synfact/3)}
-           
-       netParams.stimTargetParams['OLM_alv2'] = {'source': 'alv_bkg', 'synMech': 'PC-OLM',
-                                                 'conds': {'pop': 'OLM_pop'},							   
-                                                 'weight': 'uniform(0.275,0.325)',
-                                                 'delay': 1,
-                                                 'sec': 'basal', 
-                                                 'loc': 0.5, 
-                                                 'synsPerConn': 5*int(cfg.alv_olm_synfact/3)}
-       
-       netParams.stimTargetParams['OLM_alv3'] = {'source': 'alv_bkg', 'synMech': 'PC-OLM',
-                                                 'conds': {'pop': 'OLM_pop'},							   
-                                                 'weight': 'uniform(0.275,0.325)',
-                                                 'delay': 1,
-                                                 'sec': 'basal', 
-                                                 'loc': 0.5, 
-                                                 'synsPerConn': 5*int(cfg.alv_olm_synfact/3)
-                                                  + 5*int(cfg.alv_olm_synfact % 3)
-                                                 }
-
+# --- CLAMPS (Simplificado y robusto) ---
 if cfg.doAlvPYRclamp:
-        
-    doIclampsoma = True
-    doIclampdend = True
+    # Soma Clamp
+    netParams.stimSourceParams['I1'] = {'type': 'IClamp', 'del': 0, 'dur': cfg.duration, 'amp': cfg.alvsomaclampamp}
+    netParams.stimTargetParams['I1targ'] = {
+        'source': 'I1', 
+        'conds': {'pop': 'PYR_pop'}, # O el nombre de tu población de piramidales
+        'sec': 'soma_0', 
+        'loc': 0.5
+    }
     
+    # Dendrite Clamps
+    dendclapsec = ['apic_10', 'apic_20', 'apic_30', 'apic_40', 'apic_50']
+    netParams.stimSourceParams['I2'] = {'type': 'IClamp', 'del': 0, 'dur': cfg.duration, 'amp': 0.01}
     
-    
-    if doIclampsoma:
-     
-        netParams.stimSourceParams['I1'] = {'type': 'IClamp', 'del': 0, 
-                                        'dur': cfg.duration, 'amp': cfg.alvsomaclampamp}
-        
-        netParams.stimTargetParams['I1targ'] = {'source': 'I1', 
-                                           'conds': {'cellType': cfg.alvclamptarg, 
-                                                     'cellModel': cfg.alvclamptarg}, 
-      									   'sec': 'soma_0', 'loc': 0.5}
-    
-    if doIclampdend:
-        
-        dendclampamp = 0.01
-        dendclapsec = ['apic_10', 'apic_20', 'apic_30', 'apic_40', 'apic_50']
-          
-        netParams.stimSourceParams['I2'] = {'type': 'IClamp', 'del': 0, 
-                                        'dur': cfg.duration, 'amp': dendclampamp}
-        
-        for x in dendclapsec:
-            netParams.stimTargetParams['I2targ_' + x] = {'source': 'I2', 
-                                               'conds': {'cellType': cfg.alvclamptarg, 
-                                                         'cellModel': cfg.alvclamptarg}, 
-          									   'sec': x, 'loc': 0.5}
+    for x in dendclapsec:
+        netParams.stimTargetParams[f'I2targ_{x}'] = {
+            'source': 'I2', 
+            'conds': {'pop': 'PYR_pop'}, 
+            'sec': x, 
+            'loc': 0.5
+        }

@@ -15,11 +15,11 @@ cfg.duration = 600
 cfg.starttime = 300
 cfg.seedval = 42
 
-cfg.pyrpopsize = 1
+cfg.pyrpopsize = 120
 cfg.pcscalenum = 1 
 cfg.pvbcpopsize = 1
 cfg.pvscalenum = 1
-cfg.olmpopsize = 3
+cfg.olmpopsize = 10
 cfg.olmscalenum = 1 
 
 cfg.connectPC2PC = False # False
@@ -137,13 +137,13 @@ cfg.artifpyrpars['artifsynfact'] = 6
 
 #############################
 
-cfg.cvode_active = True
+cfg.cvode_active = False
 cfg.dt = 0.025
 cfg.hParams = {'v_init': -65, 'celsius': 34} #, 'clamp_resist': 0.001}
 cfg.verbose = False
 
 cfg.distributeSynsUniformly = False
-cfg.connRandomSecFromList = True
+cfg.connRandomSecFromList = False
 
 cfg.recordStep = 1 			# Step size in ms to save data (eg. V traces, LFP, etc)
 cfg.savePickle = False 		# Save params, network and sim output to pickle file
