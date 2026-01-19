@@ -49,10 +49,20 @@ if cfg.olmpopsize>0:
     netParams.importCellParams(label='OLM_rule', conds= {'cellType': 'OLM', 'cellModel': 'OLM'},
        	fileName = 'olm.hoc', cellName='INT_cAC_noljp', somaAtOrigin=somator)
         
-              
     netParams.popParams['OLM_pop'] = {'cellType': 'OLM',
                                           'numCells': cfg.olmpopsize, 
                                           'cellModel': 'OLM'}       
+
+    # === NUEVO: Construir lista de secciones basales para OLM ===
+    OLMbasalSecList = []
+    for secName, sec in netParams.cellParams['OLM_rule'].secs.items():
+        if 'basal' in secName:
+            OLMbasalSecList.append(secName)
+    
+    # Si no se encontraron secciones basales, usar 'soma_0' como respaldo
+    if not OLMbasalSecList:
+        OLMbasalSecList = ['soma_0']
+    # =============================================================    
 
  
 if cfg.pyrpopsize>0:
@@ -200,14 +210,14 @@ netParams.pvbc_pvbc_synfact = cfg.pvbc_pvbc_synfact
 if cfg.connectPCOLM: 
     netParams.connParams['PC-OLM'] = {
      	'preConds': {'pop': 'PYR_pop'}, 
-    'postConds': {'pop': 'OLM_pop'},  #  PYR -> PYR random
-    'synMech': 'PC-OLM',
-    'synsPerConn': 
-    'int(binomial(int(pcscalenum*5*pc_olm_synfact),pc_olm_conprob))',
+        'postConds': {'pop': 'OLM_pop'},
+        'synMech': 'PC-OLM',
+        'synsPerConn': 'int(binomial(int(pcscalenum*5*pc_olm_synfact),pc_olm_conprob))',
      	'weight': 'uniform(np_pc_olm_lowbound,np_pc_olm_hibound)*np_pc_olm_wei',
      	'delay': 'uniform(0.5,2)', 
-     	'sec': cfg.pc_olm_sec
-     }				
+     	'sec': OLMbasalSecList,  # Cambiado de cfg.pc_olm_sec a OLMbasalSecList
+        'connRandomSecFromList': True  # Agregado: permite elegir secciones al azar de la lista
+     }		
 
 
     
