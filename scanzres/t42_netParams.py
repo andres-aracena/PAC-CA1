@@ -306,20 +306,23 @@ if cfg.artifpyrpars['doartif'] and cfg.artifpyrpars['artifperpyr'] > 0:
    netParams.npartif_pc_wei_low = cfg.artifpyrpars['npartifwei_low'] 
    netParams.npartif_pc_wei_hi = cfg.artifpyrpars['npartifwei_hi']
    
+   # FIX: Generar una sección aleatoria de SCsecList para cada conexión en la lista
+   # Esto resuelve el AssertionError al igualar las longitudes
+   artif_secs = [random.choice(SCsecList) for _ in range(len(apyr.artifconnlist))]
    
    netParams.popParams['artif_pyr'] = {'cellModel':'VecStim', 
-                                    'cellsList': apyr.cellsList}  
+                                       'cellsList': apyr.cellsList}  
     
    netParams.connParams['artif-PC'] = {
- 	'preConds': {'pop': 'artif_pyr'}, 
-    'postConds': {'pop': 'PYR_pop'},  #  PYR -> PYR random
-    'connList': apyr.artifconnlist,
-    'synMech': cfg.artifpyrpars['artifsynmech'],
-    'synsPerConn': int(cfg.artifpyrpars['artifsynfact']), 
-    'weight': 'uniform(npartif_pc_wei_low,npartif_pc_wei_hi)',
-    'delay': 'uniform(0.5,2)',
-    'sec': SCsecList,
-   }			
+        'preConds': {'pop': 'artif_pyr'}, 
+        'postConds': {'pop': 'PYR_pop'}, 
+        'connList': apyr.artifconnlist,
+        'synMech': cfg.artifpyrpars['artifsynmech'],
+        'synsPerConn': int(cfg.artifpyrpars['artifsynfact']), 
+        'weight': 'uniform(npartif_pc_wei_low,npartif_pc_wei_hi)',
+        'delay': 'uniform(0.5,2)',
+        'sec': artif_secs,  # <--- Usamos la lista de la misma longitud
+   }
 
 
 if cfg.doAlvstim:

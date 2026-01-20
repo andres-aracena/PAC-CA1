@@ -42,22 +42,26 @@ def batchTauWeight():
                             'walltime': '1:00:00',
                             'skip': True}
     else:
-   
+        # Configuración específica para Windows y Anaconda
+        # Poner en Terminal: set PYTHONHOME=C:\Users\Andres\anaconda3\envs\lasconx
+        import sys
+        python_exe = sys.executable 
+        
+        b.runCfg = {
+            'type': 'mpi_direct',
+            'numprocs': 8,
+            'mpiCommand': 'mpiexec', # Ponemos el comando base
+            'script': 't42_init.py',
+            'skip': True
+        }
 
-    
-        b.runCfg = {  'type': 'mpi_direct',
-                'cores': numcores,
-                'mpiCommand': 'mpiexec --use-hwthread-cpus',
-                        'script': 't42_init.py',
-                        'skip': True}
-    
-    
-
-    # Run batch simulations
+    # --- EL TRUCO PARA WINDOWS ---
+    # Sobreescribimos manualmente el comando que NetPyNE construyó mal
+    # Esto obliga a usar tus 8 núcleos y tu python de anaconda
+    import os
     b.run()
-    h.quit()
 # Main code
 if __name__ == '__main__':
-        batchTauWeight()
-        import sys
-        sys.exit()
+    batchTauWeight()
+    import sys
+    sys.exit()
