@@ -48,13 +48,13 @@ def batchTauWeight():
         python_exe = sys.executable 
         
         b.runCfg = {
-            'type': 'mpi_direct',
-            'numprocs': 8,
-            'mpiCommand': 'mpiexec', # Ponemos el comando base
+            'type': 'mpi_bulletin',
+            'numproc': 8,
+            'mpiCommand': 'mpiexec',
+            'custom': '',
             'script': 't42_init.py',
             'skip': True
         }
-
     # --- EL TRUCO PARA WINDOWS ---
     # Sobreescribimos manualmente el comando que NetPyNE construyó mal
     # Esto obliga a usar tus 8 núcleos y tu python de anaconda

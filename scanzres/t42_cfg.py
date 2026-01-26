@@ -16,17 +16,17 @@ cfg = specs.SimConfig()					# object of class SimConfig to store simulation conf
 # ================================================================
 
 # 1. DURACIÓN CORRECTA (ya está bien: 6300 ms = 6.3 segundos)
-cfg.duration = 6300
+cfg.duration = 1300
 cfg.starttime = 300
 cfg.seedval = 42
 
 # 2. POBLACIONES CORRECTAS (ya están bien)
-cfg.pyrpopsize = 24    # SM = 240 | FM = 480 células
-cfg.olmpopsize = 1     # SM = 10 | FM = 20 células
+cfg.pyrpopsize = 120    # SM = 240 | FM = 480 células
+cfg.olmpopsize = 10     # SM = 10 | FM = 20 células
 cfg.pvbcpopsize = 0     # Sin PVBC en el SM
-cfg.pcscalenum = 1      # 
+cfg.pcscalenum = 4       # Factor de escala PYR
+cfg.olmscalenum = 2      # Factor de escala OLM
 cfg.pvscalenum = 1      # Irrelevante porque pvbcpopsize=0
-cfg.olmscalenum = 1     #
 
 # 3. CONEXIONES CORRECTAS (solo PYR→OLM y OLM→PYR)
 cfg.connectPC2PC = False        # Sin conexiones recurrentes PYR→PYR
@@ -74,8 +74,8 @@ cfg.pvbc_pvbc_synfact = 1
 
 # 7. CONDUCTANCIAS SINÁPTICAS - RANGOS CORRECTOS
 # PYR-OLM: [0.2, 0.4] nS (un poco menor que [0.275, 0.325] del paper)
-cfg.pc_olm_lowbound = 0.2       # Cambiado de 0.5
-cfg.pc_olm_hibound = 0.4        # Cambiado de 0.7
+cfg.pc_olm_lowbound = 1.0    # 1.0 nS (antes 0.2)
+cfg.pc_olm_hibound = 2.0     # 2.0 nS (antes 0.4)
 cfg.pc_olm_wei = 1.0            # Multiplicador = 1.0 para obtener rango directo
 cfg.pc_pv_wei = 1
 
@@ -166,33 +166,45 @@ cfg.connRandomSecFromList = False
 
 cfg.recordStep = 1 			# Step size in ms to save data (eg. V traces, LFP, etc)
 
-# 10. TIEMPO DE SIMULACIÓN Y ANÁLISIS
-cfg.savePickle = True           # Para análisis posterior
+# MEJORA: Configuración de guardado para análisis posterior
+cfg.savePickle = True           
 cfg.saveJson = True
 cfg.saveFileStep = 1000     # step size in ms to save data to disk
 
-# MEJORA 7: Configurar análisis mejorado
+# MEJORA: Configurar análisis mejorado
 cfg.analysis = {}
 
-# MEJORA 8: Raster plot mejorado - SOLUCIÓN SIMPLIFICADA
+# MEJORA: Raster plot simplificado pero funcional
 cfg.analysis['plotRaster'] = {
     'include': ['PYR_pop', 'OLM_pop'],
     'saveFig': True, 
     'showFig': False
 }
 
-# SOLUCIÓN: Configuración de grabación CORREGIDA
+# SOLUCIÓN CORREGIDA: Configuración de grabación sin conflictos
 cfg.recordStim = False
 cfg.recordTime = True  
 
-# SOLUCIÓN: Grabar solo voltajes básicos sin condiciones complejas
-cfg.recordTraces = {'V_soma': {'sec':'soma_0','loc':0.5,'var':'v'}}
+# SOLUCIÓN: Configuración SEGURA - Solo grabar trazas básicas
+# Opción A: Grabar solo 1 célula de cada tipo (más seguro)
+cfg.recordTraces = {
+    'V_soma_PYR0': {'sec': 'soma_0', 'loc': 0.5, 'var': 'v'},
+    'V_soma_OLM0': {'sec': 'soma_0', 'loc': 0.5, 'var': 'v'}
+}
 
-# SOLUCIÓN: Análisis de trazas simplificado
-cfg.analysis['plotTraces'] = {'include': [0], 'saveFig': False, 'showFig': False}
+# SOLUCIÓN: Análisis de trazas corregido (usar índices existentes)
+cfg.analysis['plotTraces'] = {
+    'include': [0],  # Solo la primera célula para vista rápida
+    'saveFig': False, 
+    'showFig': False,
+    'timeRange': [0, 500]  # Solo primeros 500 ms para prueba
+}
 
 # SOLUCIÓN: Análisis de tasa básico
-cfg.analysis['plotRate'] = {'saveFig': False, 'showFig': False}
+cfg.analysis['plotRate'] = {
+    'saveFig': False, 
+    'showFig': False
+}
 
-# Configuración de seeds
+# Configuración de seeds (sin cambios)
 cfg.seeds = {'conn': cfg.seedval + 7515, 'stim': cfg.seedval + 84331, 'loc': cfg.seedval + 943}
