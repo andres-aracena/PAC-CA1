@@ -246,23 +246,29 @@ netParams.sc_wei_A = cfg.sc_wei_left   # Será actualizado por el script princip
 netParams.sc_wei_B = cfg.sc_wei_right  # Será actualizado por el script principal
 
 # Conexión Task_Input → PYR_A (Opción Correcta)
+# CRÍTICO: Estímulo directo al soma con múltiples sinapsis
+# Las 10 sinapsis se distribuirán uniformemente en el soma
 netParams.stimTargetParams['Input->PYR_A'] = {
     'source': 'Task_Input',
     'conds': {'pop': 'PYR_A'},
     'synMech': 'SC-PC',
     'weight': 'sc_wei_A',  # Variable controlada externamente
+    'synsPerConn': 10,  # Múltiples sinapsis distribuidas uniformemente
     'delay': 'uniform(0.5, 2)',
-    'sec': SCsecList if len(SCsecList) > 0 else ['soma_0']
+    'sec': 'soma_0'  # Directo al soma (distribución automática)
 }
 
 # Conexión Task_Input → PYR_B (Opción Incorrecta)
+# CRÍTICO: Estímulo directo al soma con múltiples sinapsis
+# Las 10 sinapsis se distribuirán uniformemente en el soma
 netParams.stimTargetParams['Input->PYR_B'] = {
     'source': 'Task_Input',
     'conds': {'pop': 'PYR_B'},
     'synMech': 'SC-PC',
     'weight': 'sc_wei_B',  # Variable controlada externamente
+    'synsPerConn': 10,  # Múltiples sinapsis distribuidas uniformemente
     'delay': 'uniform(0.5, 2)',
-    'sec': SCsecList if len(SCsecList) > 0 else ['soma_0']
+    'sec': 'soma_0'  # Directo al soma (distribución automática)
 }
 
 # =============================================================================

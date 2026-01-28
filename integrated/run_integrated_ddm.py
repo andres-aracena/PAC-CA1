@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Script Principal Integrado: Simulación DDM con Modelo CA1 Biofísico
-Versión MPI corregida - Estructura simplificada
+Script Principal FINAL: Todos los gráficos + Configuración mejorada
+Genera: DDM_Trajectory_Full, Learning_Result, Model_Output_Raster, 
+Model_Output_Trace, Raster_Split (por trial)
 """
 
 import sys
@@ -11,7 +12,6 @@ import os
 # =============================================================================
 # CONFIGURACIÓN MPI
 # =============================================================================
-# Para evitar problemas, configuramos esto al inicio
 if 'mpi4py' in sys.modules:
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
@@ -19,7 +19,6 @@ if 'mpi4py' in sys.modules:
     nhosts = comm.Get_size()
     USE_MPI = True
 else:
-    # Intentar importar mpi4py
     try:
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
@@ -32,15 +31,14 @@ else:
         USE_MPI = False
 
 # =============================================================================
-# CONFIGURACIÓN DE MATPLOTLIB (antes de cualquier import)
+# CONFIGURACIÓN DE MATPLOTLIB
 # =============================================================================
-# Solo el proceso maestro necesita matplotlib
 if rank == 0:
     import matplotlib
-    matplotlib.use('Agg')  # Backend no interactivo
+    matplotlib.use('Agg')
 
 # =============================================================================
-# IMPORTS COMUNES A TODOS LOS PROCESOS
+# IMPORTS
 # =============================================================================
 from netpyne import sim
 
@@ -53,21 +51,18 @@ except ImportError as e:
     sys.exit(1)
 
 # =============================================================================
-# PARÁMETROS GLOBALES (definidos para todos los procesos)
+# PARÁMETROS GLOBALES
 # =============================================================================
-N_TRIALS = 5  # Reducido para pruebas, puedes cambiarlo después
+N_TRIALS = 5
 TARGET_SIDE = 'A'
-LTP_RATE = 0.032
-LTD_RATE = 0.023
+LTP_RATE = 0.05
+LTD_RATE = 0.03
 
-# =============================================================================
-# VARIABLES GLOBALES
-# =============================================================================
 current_weight_A = cfg.sc_wei_left
 current_weight_B = cfg.sc_wei_right
 
 # =============================================================================
-# BLOQUE DEL PROCESO MAESTRO (rank 0)
+# BLOQUE DEL PROCESO MAESTRO
 # =============================================================================
 if rank == 0:
     print("=" * 80)
@@ -76,33 +71,38 @@ if rank == 0:
     print(f"MPI: Proceso {rank} de {nhosts} (MAESTRO)")
     print("\n>>> INICIALIZANDO CONFIGURACIÓN...")
     
-    # Importar módulos específicos del maestro
     import matplotlib.pyplot as plt
     import numpy as np
     from scipy import signal
+    from matplotlib.lines import Line2D
     
     print(f"   > Paso de tiempo (dt): {cfg.dt} ms")
     print(f"   > Duración por trial: {cfg.duration} ms")
     print(f"   > Poblaciones: PYR_A={cfg.popA_size}, PYR_B={cfg.popB_size}, OLM={cfg.olm_size}")
     
-    # Historiales (solo en maestro)
+    # Historiales
     history_weights_A = []
     history_weights_B = []
     history_choice = []
+    history_spikes_A = []
+    history_spikes_B = []
+    history_spikes_OLM = []
     
-    # Memoria para trayectorias DDM
+    # Memoria DDM
     full_trace_A = []
     full_trace_B = []
     experiment_decision_points = []
+    
+    # Datos de trials
+    all_trial_data = []
     
     print(f"\n>>> INICIANDO EXPERIMENTO: {N_TRIALS} Trials")
     print("-" * 80)
     
     # =========================================================================
-    # FUNCIONES AUXILIARES (definidas solo en rank 0)
+    # FUNCIONES AUXILIARES
     # =========================================================================
     def extract_spikes_by_population(sim_data, pop_name):
-        """Extrae tiempos de espigas para una población específica"""
         all_spikes_time = np.array(sim_data['spkt'])
         all_spikes_gid = np.array(sim_data['spkid'])
         pop_gids = np.array(sim.net.pops[pop_name].cellGids)
@@ -110,39 +110,30 @@ if rank == 0:
         return all_spikes_time[mask], all_spikes_gid[mask], pop_gids
     
     def compute_firing_rate_time_series(spike_times, pop_size, duration, dt_bin):
-        """Calcula serie temporal de tasa de disparo con ventana deslizante"""
         time_bins = np.arange(0, duration, dt_bin)
         rates = []
-        
         for t in time_bins:
             t_end = t + dt_bin
             spike_count = np.sum((spike_times >= t) & (spike_times < t_end))
             rate_hz = (spike_count / pop_size) * (1000.0 / dt_bin)
             rates.append(float(rate_hz))
-        
         return time_bins, np.array(rates)
     
-    def simulate_ddm_race(rate_A, rate_B, time_bins, threshold=30.0, alpha=0.10, 
-                          noise_std=0.1, leak=0.01):
-        """Simula modelo de carrera (Racing DDM)"""
+    def simulate_ddm_race(rate_A, rate_B, time_bins, threshold=25.0, alpha=0.15, 
+                          noise_std=0.2, leak=0.01):
         x_A, x_B = 0.0, 0.0
         trace_A, trace_B = [0.0], [0.0]
         winner = 'NONE'
         rt = time_bins[-1] if len(time_bins) > 0 else 0
         
         for i, t in enumerate(time_bins):
-            # Ecuación de acumulación: dx = alpha*rate + noise - leak*x
             x_A += (alpha * rate_A[i]) + np.random.normal(0, noise_std) - (leak * x_A)
             x_B += (alpha * rate_B[i]) + np.random.normal(0, noise_std) - (leak * x_B)
-            
-            # No negativos
             x_A = float(max(0, x_A))
             x_B = float(max(0, x_B))
-            
             trace_A.append(x_A)
             trace_B.append(x_B)
             
-            # Detección de umbral
             if x_A >= threshold:
                 winner = 'A'
                 rt = t
@@ -154,73 +145,67 @@ if rank == 0:
         
         return trace_A, trace_B, winner, rt
     
-    def plot_raster_split(trial_num, spikes_A, gids_A, spikes_B, gids_B, 
-                          weight_A, weight_B, duration):
-        """Genera raster plot dividido por población"""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    def plot_raster_split_trial(trial_num, spikes_A, gids_A, spikes_B, gids_B,
+                                spikes_OLM, gids_OLM, weight_A, weight_B, duration):
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
         
-        ax1.scatter(spikes_A, gids_A, s=10, c='green', marker='|', alpha=0.6)
-        ax1.set_title(f'Trial {trial_num}: PYR_A (Correcta) - W={weight_A:.4f}')
-        ax1.set_ylabel('GID')
+        if len(spikes_A) > 0:
+            ax1.scatter(spikes_A, gids_A, s=12, c='green', marker='|', alpha=0.7)
+        ax1.set_title(f'Trial {trial_num}: PYR_A (Correcta) - W={weight_A:.3f} nS', 
+                     fontsize=12, fontweight='bold', color='green')
+        ax1.set_ylabel('GID', fontsize=10)
         ax1.set_xlim([0, duration])
-        ax1.grid(True, alpha=0.3)
+        ax1.grid(True, alpha=0.2, axis='x')
         
-        ax2.scatter(spikes_B, gids_B, s=10, c='red', marker='|', alpha=0.6)
-        ax2.set_title(f'Trial {trial_num}: PYR_B (Incorrecta) - W={weight_B:.4f}')
-        ax2.set_xlabel('Tiempo (ms)')
-        ax2.set_ylabel('GID')
+        if len(spikes_B) > 0:
+            ax2.scatter(spikes_B, gids_B, s=12, c='red', marker='|', alpha=0.7)
+        ax2.set_title(f'PYR_B (Incorrecta) - W={weight_B:.3f} nS', 
+                     fontsize=12, fontweight='bold', color='red')
+        ax2.set_ylabel('GID', fontsize=10)
         ax2.set_xlim([0, duration])
-        ax2.grid(True, alpha=0.3)
+        ax2.grid(True, alpha=0.2, axis='x')
+        
+        if len(spikes_OLM) > 0:
+            ax3.scatter(spikes_OLM, gids_OLM, s=12, c='blue', marker='|', alpha=0.7)
+        ax3.set_title(f'OLM (Inhibición) - {len(spikes_OLM)} spikes', 
+                     fontsize=12, fontweight='bold', color='blue')
+        ax3.set_xlabel('Tiempo (ms)', fontsize=11)
+        ax3.set_ylabel('GID', fontsize=10)
+        ax3.set_xlim([0, duration])
+        ax3.grid(True, alpha=0.2, axis='x')
         
         plt.tight_layout()
-        plt.savefig(f'Raster_Split_Trial_{trial_num}.png', dpi=150)
+        plt.savefig(f'Raster_Split_Trial_{trial_num}.png', dpi=130)
         plt.close()
 
-# =============================================================================
-# BLOQUE DE PROCESOS ESCLAVOS (rank > 0)
-# =============================================================================
 else:
     if USE_MPI:
         print(f"MPI: Proceso {rank} de {nhosts} (ESCLAVO)")
 
+cfg.analysis = {}
+
 # =============================================================================
-# BUCLE PRINCIPAL DE SIMULACIÓN
+# BUCLE PRINCIPAL
 # =============================================================================
 for trial in range(N_TRIALS):
-    # -------------------------------------------------------------------------
-    # A. SINCRONIZAR PESOS ENTRE PROCESOS
-    # -------------------------------------------------------------------------
     if rank == 0:
         print(f"\n--- TRIAL {trial + 1}/{N_TRIALS} ---")
-        
-        # Guardar historial de pesos
         history_weights_A.append(current_weight_A)
         history_weights_B.append(current_weight_B)
-        
-        # Actualizar netParams
         netParams.sc_wei_A = current_weight_A
         netParams.sc_wei_B = current_weight_B
-        
         print(f"   > Pesos: A={current_weight_A:.4f}, B={current_weight_B:.4f}")
         
-        # Enviar pesos a procesos esclavos si usamos MPI
         if USE_MPI:
-            # Crear array con los pesos
             weight_data = [current_weight_A, current_weight_B]
             comm.bcast(weight_data, root=0)
-    
     else:
-        # Procesos esclavos: recibir pesos del maestro
         if USE_MPI:
             weight_data = comm.bcast(None, root=0)
             current_weight_A, current_weight_B = weight_data
             netParams.sc_wei_A = current_weight_A
             netParams.sc_wei_B = current_weight_B
     
-    # -------------------------------------------------------------------------
-    # B. EJECUTAR SIMULACIÓN
-    # -------------------------------------------------------------------------
-    # Configurar MPI para NetPyNE
     if USE_MPI:
         cfg.useMPI = True
         cfg.comm = comm
@@ -229,256 +214,214 @@ for trial in range(N_TRIALS):
     else:
         cfg.useMPI = False
     
-    # Reiniciar y ejecutar simulación
     sim.initialize()
     sim.createSimulateAnalyze(netParams=netParams, simConfig=cfg)
     
-    # -------------------------------------------------------------------------
-    # C. PROCESAMIENTO DE RESULTADOS (solo rank 0)
-    # -------------------------------------------------------------------------
     if rank == 0:
-        # Extraer datos de espigas
-        spikes_A, gids_A_spikes, pop_gids_A = extract_spikes_by_population(
-            sim.allSimData, 'PYR_A'
-        )
-        spikes_B, gids_B_spikes, pop_gids_B = extract_spikes_by_population(
-            sim.allSimData, 'PYR_B'
-        )
+        spikes_A, gids_A_spikes, pop_gids_A = extract_spikes_by_population(sim.allSimData, 'PYR_A')
+        spikes_B, gids_B_spikes, pop_gids_B = extract_spikes_by_population(sim.allSimData, 'PYR_B')
+        spikes_OLM, gids_OLM_spikes, pop_gids_OLM = extract_spikes_by_population(sim.allSimData, 'OLM')
         
-        print(f"   > Espigas: A={len(spikes_A)}, B={len(spikes_B)}")
+        history_spikes_A.append(len(spikes_A))
+        history_spikes_B.append(len(spikes_B))
+        history_spikes_OLM.append(len(spikes_OLM))
         
-        # Gráfico: Raster Split
-        plot_raster_split(
-            trial + 1, spikes_A, gids_A_spikes, spikes_B, gids_B_spikes,
-            current_weight_A, current_weight_B, cfg.duration
-        )
+        print(f"   > Espigas: A={len(spikes_A)}, B={len(spikes_B)}, OLM={len(spikes_OLM)}")
+        
+        all_trial_data.append({
+            'trial': trial + 1,
+            'spikes_A': spikes_A.copy(),
+            'gids_A': gids_A_spikes.copy(),
+            'spikes_B': spikes_B.copy(),
+            'gids_B': gids_B_spikes.copy(),
+            'spikes_OLM': spikes_OLM.copy(),
+            'gids_OLM': gids_OLM_spikes.copy(),
+            'weight_A': current_weight_A,
+            'weight_B': current_weight_B
+        })
+        
+        plot_raster_split_trial(trial + 1, spikes_A, gids_A_spikes, spikes_B, gids_B_spikes,
+                               spikes_OLM, gids_OLM_spikes, current_weight_A, current_weight_B, cfg.duration)
         print(f"   > Guardado: Raster_Split_Trial_{trial+1}.png")
         
-        # ---------------------------------------------------------------------
-        # D. Cálculo DDM / Racing Model
-        # ---------------------------------------------------------------------
-        dt_decision = 10.0  # ms por bin
+        dt_decision = 10.0
+        time_bins_A, rate_A = compute_firing_rate_time_series(spikes_A, cfg.popA_size, cfg.duration, dt_decision)
+        time_bins_B, rate_B = compute_firing_rate_time_series(spikes_B, cfg.popB_size, cfg.duration, dt_decision)
+        trace_A_trial, trace_B_trial, winner, rt = simulate_ddm_race(rate_A, rate_B, time_bins_A)
         
-        # Calcular tasas de disparo
-        time_bins_A, rate_A = compute_firing_rate_time_series(
-            spikes_A, cfg.popA_size, cfg.duration, dt_decision
-        )
-        time_bins_B, rate_B = compute_firing_rate_time_series(
-            spikes_B, cfg.popB_size, cfg.duration, dt_decision
-        )
-        
-        # Simular acumulación (carrera)
-        trace_A_trial, trace_B_trial, winner, rt = simulate_ddm_race(
-            rate_A, rate_B, time_bins_A,
-            threshold=30.0, alpha=0.10, noise_std=0.1, leak=0.01
-        )
-        
-        # ---------------------------------------------------------------------
-        # E. Guardar Trayectorias
-        # ---------------------------------------------------------------------
         full_trace_A.extend(trace_A_trial)
         full_trace_B.extend(trace_B_trial)
         
-        # Relleno visual
         remaining = int((cfg.duration - rt) / dt_decision)
         if remaining > 0 and len(trace_A_trial) > 0:
-            final_A = trace_A_trial[-1]
-            final_B = trace_B_trial[-1]
-            full_trace_A.extend([final_A] * remaining)
-            full_trace_B.extend([final_B] * remaining)
+            full_trace_A.extend([trace_A_trial[-1]] * remaining)
+            full_trace_B.extend([trace_B_trial[-1]] * remaining)
         
         experiment_decision_points.append(len(full_trace_A))
         
-        # ---------------------------------------------------------------------
-        # F. Aprendizaje (Actualización de Pesos)
-        # ---------------------------------------------------------------------
-        # Fallback si no hay decisión
         if winner == 'NONE':
             winner = 'A' if len(spikes_A) > len(spikes_B) else 'B'
-            print(f"   > Sin cruce de umbral. Decisión por conteo: {winner}")
         
         is_correct = (winner == TARGET_SIDE)
         history_choice.append(1 if is_correct else 0)
-        
         print(f"   > Resultado: {winner} ({'ACIERTO' if is_correct else 'FALLO'}) | RT={rt:.1f} ms")
         
-        # Regla de aprendizaje
         if is_correct:
-            # Potenciar la respuesta correcta y debilitar la incorrecta
             current_weight_A += (current_weight_A * LTP_RATE)
             current_weight_B -= (current_weight_B * LTD_RATE)
         else:
-            # Solo debilitar la respuesta incorrecta
             current_weight_B -= (current_weight_B * LTD_RATE)
         
-        # Limitar pesos
-        current_weight_A = np.clip(current_weight_A, 0.001, 1.0)
-        current_weight_B = np.clip(current_weight_B, 0.001, 1.0)
+        current_weight_A = np.clip(current_weight_A, 0.01, 10.0)
+        current_weight_B = np.clip(current_weight_B, 0.01, 10.0)
     
-    # Sincronizar procesos antes del próximo trial
     if USE_MPI:
         comm.Barrier()
 
 # =============================================================================
-# GENERACIÓN DE GRÁFICOS FINALES (solo rank 0)
+# GRÁFICOS FINALES
 # =============================================================================
 if rank == 0:
     print("\n" + "=" * 80)
     print(">>> GENERANDO GRÁFICOS FINALES...")
     print("=" * 80)
     
-    # -------------------------------------------------------------------------
-    # A. Final_Learning_Results (Evolución de Pesos y Desempeño)
-    # -------------------------------------------------------------------------
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    # 1. LEARNING_RESULT
+    fig_learn, axes_learn = plt.subplots(3, 1, figsize=(12, 10))
+    trials_x = range(1, N_TRIALS + 1)
     
-    ax1.plot(history_weights_A, 'g-o', label='Peso A (Correcto)', linewidth=2)
-    ax1.plot(history_weights_B, 'r-x', label='Peso B (Incorrecto)', linewidth=2)
-    ax1.set_title('Evolución de Pesos Sinápticos', fontsize=14, fontweight='bold')
-    ax1.set_ylabel('Peso Sináptico', fontsize=12)
-    ax1.legend(fontsize=11)
-    ax1.grid(True, alpha=0.3)
+    axes_learn[0].plot(trials_x, history_weights_A, 'g-o', label='Peso A', lw=2.5, ms=8)
+    axes_learn[0].plot(trials_x, history_weights_B, 'r-x', label='Peso B', lw=2.5, ms=8)
+    axes_learn[0].set_title('Evolución de Pesos', fontsize=14, fontweight='bold')
+    axes_learn[0].set_ylabel('Peso (nS)', fontsize=12)
+    axes_learn[0].legend(fontsize=11)
+    axes_learn[0].grid(True, alpha=0.3)
     
-    ax2.plot(history_choice, 'b-s', linewidth=2, markersize=8)
-    ax2.set_title('Historial de Aciertos', fontsize=14, fontweight='bold')
-    ax2.set_xlabel('Trial', fontsize=12)
-    ax2.set_ylabel('Resultado (1=Acierto, 0=Fallo)', fontsize=12)
-    ax2.set_yticks([0, 1])
-    ax2.set_yticklabels(['Fallo', 'Acierto'])
-    ax2.grid(True, alpha=0.3)
+    axes_learn[1].plot(trials_x, history_choice, 'b-s', lw=2.5, ms=10)
+    axes_learn[1].fill_between(trials_x, history_choice, alpha=0.3)
+    axes_learn[1].set_title('Historial de Aciertos', fontsize=14, fontweight='bold')
+    axes_learn[1].set_ylabel('Resultado', fontsize=12)
+    axes_learn[1].set_yticks([0, 1])
+    axes_learn[1].set_yticklabels(['Fallo', 'Acierto'])
+    axes_learn[1].grid(True, alpha=0.3)
+    
+    axes_learn[2].plot(trials_x, history_spikes_A, 'g-o', label='PYR_A', lw=2, ms=7)
+    axes_learn[2].plot(trials_x, history_spikes_B, 'r-x', label='PYR_B', lw=2, ms=7)
+    axes_learn[2].plot(trials_x, history_spikes_OLM, 'b-^', label='OLM', lw=2, ms=7)
+    axes_learn[2].set_title('Actividad por Trial', fontsize=14, fontweight='bold')
+    axes_learn[2].set_xlabel('Trial', fontsize=12)
+    axes_learn[2].set_ylabel('Número de Espigas', fontsize=12)
+    axes_learn[2].legend(fontsize=11)
+    axes_learn[2].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('Final_Learning_Results.png', dpi=150)
+    plt.savefig('Learning_Result.png', dpi=150)
     plt.close()
-    print("   > Guardado: Final_Learning_Results.png")
+    print("   > Guardado: Learning_Result.png")
+    
+    # 2. DDM_TRAJECTORY_FULL
+    fig_ddm, ax_ddm = plt.subplots(figsize=(16, 7))
+    t_vec = np.arange(0, len(full_trace_A) * 10.0, 10.0)
+    
+    ax_ddm.plot(t_vec, full_trace_A, 'g', lw=2.5, label='Acumulación A', alpha=0.8)
+    ax_ddm.plot(t_vec, full_trace_B, 'r', lw=2.5, label='Acumulación B', alpha=0.8)
+    
+    for idx in experiment_decision_points[:-1]:
+        ax_ddm.axvline(x=idx*10.0, color='gray', ls=':', lw=1.5, alpha=0.6)
+    
+    ax_ddm.axhline(y=25.0, color='black', ls='--', lw=2, label='Umbral')
+    ax_ddm.set_title(f'Trayectorias DDM ({N_TRIALS} Trials)', fontsize=15, fontweight='bold')
+    ax_ddm.set_xlabel('Tiempo Total (ms)', fontsize=13)
+    ax_ddm.set_ylabel('Acumulación', fontsize=13)
+    ax_ddm.legend(fontsize=12)
+    ax_ddm.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('DDM_Trajectory_Full.png', dpi=150)
+    plt.close()
+    print("   > Guardado: DDM_Trajectory_Full.png")
+    
+    # 3. MODEL_OUTPUT_RASTER
+    fig_rast, ax_rast = plt.subplots(figsize=(16, 10))
+    time_offset = 0
+    
+    for trial_data in all_trial_data:
+        spikes_A_offset = trial_data['spikes_A'] + time_offset
+        spikes_B_offset = trial_data['spikes_B'] + time_offset
+        spikes_OLM_offset = trial_data['spikes_OLM'] + time_offset
+        
+        if len(spikes_A_offset) > 0:
+            ax_rast.scatter(spikes_A_offset, trial_data['gids_A'] + 40, s=8, c='green', marker='|', alpha=0.6)
+        if len(spikes_B_offset) > 0:
+            ax_rast.scatter(spikes_B_offset, trial_data['gids_B'], s=8, c='red', marker='|', alpha=0.6)
+        if len(spikes_OLM_offset) > 0:
+            ax_rast.scatter(spikes_OLM_offset, trial_data['gids_OLM'] + 20, s=8, c='blue', marker='|', alpha=0.6)
+        
+        if trial_data['trial'] < N_TRIALS:
+            ax_rast.axvline(x=time_offset + cfg.duration, color='black', ls='--', lw=1, alpha=0.4)
+        
+        time_offset += cfg.duration
+    
+    ax_rast.set_title(f'Raster Completo: {N_TRIALS} Trials', fontsize=15, fontweight='bold')
+    ax_rast.set_xlabel('Tiempo (ms)', fontsize=13)
+    ax_rast.set_ylabel('GID', fontsize=13)
+    ax_rast.grid(True, alpha=0.2, axis='x')
+    
+    legend_elements = [
+        Line2D([0], [0], marker='|', color='w', markerfacecolor='g', ms=10, label='PYR_A'),
+        Line2D([0], [0], marker='|', color='w', markerfacecolor='b', ms=10, label='OLM'),
+        Line2D([0], [0], marker='|', color='w', markerfacecolor='r', ms=10, label='PYR_B')
+    ]
+    ax_rast.legend(handles=legend_elements, fontsize=12)
+    
+    plt.tight_layout()
+    plt.savefig('Model_Output_Raster.png', dpi=130)
+    plt.close()
+    print("   > Guardado: Model_Output_Raster.png")
+    
+    # 4. MODEL_OUTPUT_TRACE
+    if 'V_soma' in sim.allSimData and len(sim.allSimData['V_soma']) > 0:
+        time_vec = np.array(sim.allSimData['t'])
+        trace_A = sim.allSimData['V_soma'].get('cell_0', [])
+        trace_B = sim.allSimData['V_soma'].get(f'cell_{cfg.popA_size}', [])
+        trace_OLM = sim.allSimData['V_soma'].get(f'cell_{cfg.popA_size + cfg.popB_size}', [])
+        
+        if len(trace_A) > 0 and len(trace_B) > 0:
+            fig_trace, (ax_pyr, ax_olm) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+            
+            ax_pyr.plot(time_vec, trace_A, 'g', label='PYR_A', alpha=0.8, lw=1.2)
+            ax_pyr.plot(time_vec, trace_B, 'r', label='PYR_B', alpha=0.8, lw=1.2)
+            ax_pyr.set_title('Voltaje: PYR_A y PYR_B', fontsize=14, fontweight='bold')
+            ax_pyr.set_ylabel('Voltaje (mV)', fontsize=12)
+            ax_pyr.legend(fontsize=11)
+            ax_pyr.grid(True, alpha=0.3)
+            
+            if len(trace_OLM) > 0:
+                ax_olm.plot(time_vec, trace_OLM, 'b', alpha=0.8, lw=1.2)
+                ax_olm.set_title('Voltaje: OLM', fontsize=14, fontweight='bold', color='blue')
+                ax_olm.set_xlabel('Tiempo (ms)', fontsize=12)
+                ax_olm.set_ylabel('Voltaje (mV)', fontsize=12)
+                ax_olm.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.savefig('Model_Output_Trace.png', dpi=150)
+            plt.close()
+            print("   > Guardado: Model_Output_Trace.png")
     
     # Estadísticas
     accuracy = np.mean(history_choice) * 100
     print(f"\n   ESTADÍSTICAS FINALES:")
     print(f"   - Precisión: {accuracy:.1f}%")
-    print(f"   - Peso Final A: {current_weight_A:.4f}")
-    print(f"   - Peso Final B: {current_weight_B:.4f}")
+    print(f"   - Peso Final A: {current_weight_A:.4f} nS")
+    print(f"   - Peso Final B: {current_weight_B:.4f} nS")
     print(f"   - Ratio A/B: {current_weight_A/current_weight_B:.2f}")
-    
-    # -------------------------------------------------------------------------
-    # B. DDM_Trajectory_Full_Sequence (Historial Completo)
-    # -------------------------------------------------------------------------
-    if len(full_trace_A) > 0:
-        fig_seq, ax_seq = plt.subplots(figsize=(14, 6))
-        dt_plot = 10.0
-        t_vec = np.arange(0, len(full_trace_A) * dt_plot, dt_plot)
-        
-        ax_seq.plot(t_vec, full_trace_A, color='green', lw=2, label='Acumulación A', alpha=0.8)
-        ax_seq.plot(t_vec, full_trace_B, color='red', lw=2, label='Acumulación B', alpha=0.8)
-        
-        # Líneas verticales para separar trials
-        for idx in experiment_decision_points[:-1]:  # Excluir el último
-            ax_seq.axvline(x=idx*dt_plot, color='gray', linestyle=':', alpha=0.4)
-        
-        ax_seq.axhline(y=30.0, color='black', ls='--', lw=2, label='Umbral')
-        ax_seq.set_title('Evolución Completa de la Competencia (Todos los Trials)', 
-                         fontsize=14, fontweight='bold')
-        ax_seq.set_xlabel('Tiempo Total (ms)', fontsize=12)
-        ax_seq.set_ylabel('Acumulación', fontsize=12)
-        ax_seq.legend(fontsize=11)
-        ax_seq.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig('DDM_Trajectory_Full_Sequence.png', dpi=150)
-        plt.close()
-        print("   > Guardado: DDM_Trajectory_Full_Sequence.png")
-    
-    # -------------------------------------------------------------------------
-    # C. DDM_Trajectory (Solo el último trial)
-    # -------------------------------------------------------------------------
-    if 'trace_A_trial' in locals() and len(trace_A_trial) > 0:
-        fig_last, ax_last = plt.subplots(figsize=(10, 6))
-        t_last = np.arange(0, len(trace_A_trial) * dt_decision, dt_decision)
-        
-        ax_last.plot(t_last, trace_A_trial, color='green', lw=3, 
-                    label='Acumulación A', alpha=0.8)
-        ax_last.plot(t_last, trace_B_trial, color='red', lw=3, 
-                    label='Acumulación B', alpha=0.8)
-        ax_last.axhline(y=30.0, color='black', ls='--', lw=2, label='Umbral')
-        
-        # Marcar punto de decisión
-        if winner != 'NONE':
-            ax_last.scatter([rt], [30.0], s=200, c='gold', marker='*', 
-                           edgecolors='black', linewidths=2, 
-                           label=f'Decisión: {winner}', zorder=5)
-        
-        ax_last.set_title(f'Trayectoria de Decisión (Último Trial: {winner})', 
-                         fontsize=14, fontweight='bold')
-        ax_last.set_xlabel('Tiempo (ms)', fontsize=12)
-        ax_last.set_ylabel('Acumulación', fontsize=12)
-        ax_last.legend(fontsize=11)
-        ax_last.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig('DDM_Trajectory.png', dpi=150)
-        plt.close()
-        print("   > Guardado: DDM_Trajectory.png")
-    
-    # -------------------------------------------------------------------------
-    # D. Gráficos de Voltaje (Trazas de Soma)
-    # -------------------------------------------------------------------------
-    if 'V_soma' in sim.allSimData and len(sim.allSimData['V_soma']) > 0:
-        time_vec = np.array(sim.allSimData['t'])
-        
-        # Intentar extraer trazas de células representativas
-        trace_0 = sim.allSimData['V_soma'].get('cell_0', [])
-        trace_40 = sim.allSimData['V_soma'].get('cell_40', [])
-        
-        if len(trace_0) > 0 and len(trace_40) > 0:
-            trace_0 = np.array(trace_0)
-            trace_40 = np.array(trace_40)
-            
-            # Trazas Juntas
-            plt.figure(figsize=(12, 6))
-            plt.plot(time_vec, trace_0, 'g', label='PYR_A (Correcta)', 
-                    alpha=0.8, linewidth=1.5)
-            plt.plot(time_vec, trace_40, 'r', label='PYR_B (Incorrecta)', 
-                    alpha=0.8, linewidth=1.5)
-            plt.title('Voltaje de Soma: Competencia A vs B (Último Trial)', 
-                     fontsize=14, fontweight='bold')
-            plt.xlabel('Tiempo (ms)', fontsize=12)
-            plt.ylabel('Voltaje (mV)', fontsize=12)
-            plt.legend(fontsize=11)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig('Trazas_Juntas.png', dpi=150)
-            plt.close()
-            print("   > Guardado: Trazas_Juntas.png")
-            
-            # Trazas Separadas
-            fig_sep, (ax_s1, ax_s2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-            ax_s1.plot(time_vec, trace_0, 'g', linewidth=1.5)
-            ax_s1.set_title('PYR_A (Correcta)', fontsize=13, fontweight='bold')
-            ax_s1.set_ylabel('Voltaje (mV)', fontsize=11)
-            ax_s1.grid(True, alpha=0.3)
-            
-            ax_s2.plot(time_vec, trace_40, 'r', linewidth=1.5)
-            ax_s2.set_title('PYR_B (Incorrecta)', fontsize=13, fontweight='bold')
-            ax_s2.set_xlabel('Tiempo (ms)', fontsize=11)
-            ax_s2.set_ylabel('Voltaje (mV)', fontsize=11)
-            ax_s2.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            plt.savefig('Trazas_Separadas.png', dpi=150)
-            plt.close()
-            print("   > Guardado: Trazas_Separadas.png")
-        else:
-            print("   WARN: No se encontraron trazas de voltaje completas.")
-    
+
     print("\n" + "=" * 80)
-    print(">>> PROCESO COMPLETADO EXITOSAMENTE")
+    print(">>> PROCESO COMPLETADO")
     print("=" * 80)
 
-# =============================================================================
-# FINALIZAR MPI
-# =============================================================================
 if USE_MPI:
     if rank == 0:
-        print(">>> Simulación completada. Cerrando procesos MPI...")
+        print("\n>>> Finalizando MPI...")
     comm.Barrier()
     MPI.Finalize()
