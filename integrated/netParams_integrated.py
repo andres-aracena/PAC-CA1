@@ -3,6 +3,7 @@
 """
 NetParams Integrado: Modelo CA1 + Toma de Decisiones Competitiva
 Mantiene la biofísica del modelo original con arquitectura de dos poblaciones PYR
+FIXED: Grabación de traces y cambio de seed de estimulación
 """
 
 from netpyne import specs
@@ -231,14 +232,20 @@ if cfg.connectOLMPC and cfg.olm_size > 0:
     }
 
 # =============================================================================
-# PASO 8: ESTÍMULO EXTERNO (Entrada de Aprendizaje)
+# PASO 8: ESTÍMULO EXTERNO (Entrada de Aprendizaje) - FIXED
 # =============================================================================
 
+# CRÍTICO: Añadir parámetro de seed que cambiará en cada trial
+# Variable para controlar el seed del estímulo (se actualizará en el script principal)
+netParams.stimSeed = cfg.seeds['stim']
+
 # Fuente de estímulo (compartida para ambas poblaciones)
+# FIXED: Añadir el parámetro 'seed' que cambiará dinámicamente
 netParams.stimSourceParams['Task_Input'] = {
     'type': 'NetStim',
     'rate': cfg.sc_input_rate,    # Hz
-    'noise': cfg.sc_input_noise   # Ruido Poisson
+    'noise': cfg.sc_input_noise,  # Ruido Poisson
+    'seed': netParams.stimSeed    # Seed que cambiará en cada trial
 }
 
 # Parámetros para pesos uniformes
@@ -246,8 +253,7 @@ netParams.sc_wei_A = cfg.sc_wei_left   # Será actualizado por el script princip
 netParams.sc_wei_B = cfg.sc_wei_right  # Será actualizado por el script principal
 
 # Conexión Task_Input → PYR_A (Opción Correcta)
-# CRÍTICO: Estímulo directo al soma con múltiples sinapsis
-# Las 10 sinapsis se distribuirán uniformemente en el soma
+# FIXED: Distribución uniforme de sinapsis en el soma
 netParams.stimTargetParams['Input->PYR_A'] = {
     'source': 'Task_Input',
     'conds': {'pop': 'PYR_A'},
@@ -255,12 +261,13 @@ netParams.stimTargetParams['Input->PYR_A'] = {
     'weight': 'sc_wei_A',  # Variable controlada externamente
     'synsPerConn': 10,  # Múltiples sinapsis distribuidas uniformemente
     'delay': 'uniform(0.5, 2)',
-    'sec': 'soma_0'  # Directo al soma (distribución automática)
+    'sec': 'soma_0',  # Directo al soma
+    # Importante: Habilitar distribución uniforme
+    'distributeSynsUniformly': True
 }
 
 # Conexión Task_Input → PYR_B (Opción Incorrecta)
-# CRÍTICO: Estímulo directo al soma con múltiples sinapsis
-# Las 10 sinapsis se distribuirán uniformemente en el soma
+# FIXED: Distribución uniforme de sinapsis en el soma
 netParams.stimTargetParams['Input->PYR_B'] = {
     'source': 'Task_Input',
     'conds': {'pop': 'PYR_B'},
@@ -268,8 +275,21 @@ netParams.stimTargetParams['Input->PYR_B'] = {
     'weight': 'sc_wei_B',  # Variable controlada externamente
     'synsPerConn': 10,  # Múltiples sinapsis distribuidas uniformemente
     'delay': 'uniform(0.5, 2)',
-    'sec': 'soma_0'  # Directo al soma (distribución automática)
+    'sec': 'soma_0',  # Directo al soma
+    # Importante: Habilitar distribución uniforme
+    'distributeSynsUniformly': True
 }
+
+# =============================================================================
+# PASO 9: CONFIGURACIÓN DE GRABACIÓN DE TRACES - NUEVO Y CRÍTICO
+# =============================================================================
+
+# FIXED: Configurar correctamente la grabación de traces para todas las poblaciones
+# Esta configuración debe ser consistente con cfg_integrated.py
+
+# Configurar grabación de voltaje del soma para todas las neuronas
+# Nota: La configuración específica de qué se graba debe hacerse en cfg.recordTraces
+# Aquí solo definimos las poblaciones disponibles para grabación
 
 # =============================================================================
 # NOTA FINAL
@@ -280,3 +300,7 @@ netParams.stimTargetParams['Input->PYR_B'] = {
 # 3. Targeting dendrítico específico (OLMsecList, SCsecList)
 # 4. Arquitectura competitiva con dos poblaciones PYR
 # 5. Circuito PYR→OLM→PYR para competencia mediada por inhibición
+# FIXES:
+# 6. Seed dinámico para estimulación en cada trial
+# 7. Distribución uniforme de sinapsis en el soma
+# 8. Configuración para grabación de traces

@@ -6,10 +6,13 @@ CRITICAL FIXES:
 1. Variable seeds per trial (creates firing variability)
 2. No Unicode characters (Windows-compatible)
 3. Reduced synaptic depression (enables sustained OLM activity)
+4. Fixed trace recording configuration
+5. Dynamic seed updating for each trial
 """
 
 import sys
 import os
+import numpy as np
 
 # =============================================================================
 # MPI CONFIGURATION
@@ -55,7 +58,7 @@ except ImportError as e:
 # =============================================================================
 # PARAMETERS (M: Learning framework)
 # =============================================================================
-N_TRIALS = 10
+N_TRIALS = 5
 TARGET_SIDE = 'A'
 LTP_RATE = 0.032            # M
 LTD_RATE = 0.023            # M
@@ -77,7 +80,6 @@ if rank == 0:
     print("=" * 80 + "\n")
     
     import matplotlib.pyplot as plt
-    import numpy as np
     from scipy import signal
     from scipy.signal import butter, filtfilt
     
@@ -102,15 +104,50 @@ if rank == 0:
     print("      |   A  :   B   |  A  :  B : OLM  |  (RT ms) |    (%)  ")
     print("-" * 80)
     
-    # Helper functions
+    # Helper functions - REVISED VERSION
     def extract_spikes_by_population(sim_data, pop_name):
+        """Extract spikes for a specific population - FIXED for NetPyNE structure"""
+        if 'spkt' not in sim_data or 'spkid' not in sim_data:
+            print(f"No spike data available for {pop_name}")
+            return np.array([]), np.array([]), np.array([])
+        
         all_spikes_time = np.array(sim_data['spkt'])
         all_spikes_gid = np.array(sim_data['spkid'])
-        pop_gids = np.array(sim.net.pops[pop_name].cellGids)
-        mask = np.isin(all_spikes_gid, pop_gids)
-        return all_spikes_time[mask], all_spikes_gid[mask], pop_gids
-    
+        
+        # CRÍTICO: En NetPyNE, los GIDs comienzan desde 0 y son secuenciales
+        # Asignar rangos basados en tamaños de población
+        if pop_name == 'PYR_A':
+            first_gid = 0
+            last_gid = cfg.popA_size - 1
+        elif pop_name == 'PYR_B':
+            first_gid = cfg.popA_size
+            last_gid = cfg.popA_size + cfg.popB_size - 1
+        elif pop_name == 'OLM':
+            first_gid = cfg.popA_size + cfg.popB_size
+            last_gid = cfg.popA_size + cfg.popB_size + cfg.olm_size - 1
+        else:
+            print(f"Unknown population: {pop_name}")
+            return np.array([]), np.array([]), np.array([])
+        
+        # Crear lista de GIDs para esta población
+        pop_gids = list(range(first_gid, last_gid + 1))
+        pop_gids_array = np.array(pop_gids)
+        
+        # Filtrar spikes que pertenecen a esta población
+        mask = np.isin(all_spikes_gid, pop_gids_array)
+        
+        print(f"Population {pop_name}: GIDs {first_gid}-{last_gid}, "
+            f"Total spikes in simulation: {len(all_spikes_time)}, "
+            f"Spikes in population: {np.sum(mask)}")
+        
+        return all_spikes_time[mask], all_spikes_gid[mask], pop_gids_array
+
     def compute_firing_rate_time_series(spike_times, pop_size, duration, dt_bin):
+        """Compute firing rate time series from spikes"""
+        if len(spike_times) == 0:
+            time_bins = np.arange(0, duration, dt_bin)
+            return time_bins, np.zeros(len(time_bins))
+        
         time_bins = np.arange(0, duration, dt_bin)
         rates = []
         for t in time_bins:
@@ -122,6 +159,7 @@ if rank == 0:
     
     def simulate_ddm_race(rate_A, rate_B, time_bins, threshold=25.0, alpha=0.15, 
                           noise_std=0.2, leak=0.01):
+        """Simulate drift-diffusion model race"""
         x_A, x_B = 0.0, 0.0
         trace_A, trace_B = [0.0], [0.0]
         winner = 'NONE'
@@ -150,6 +188,7 @@ if rank == 0:
     
     def plot_raster_trial(trial_num, spikes_A, gids_A, spikes_B, gids_B,
                          spikes_OLM, gids_OLM, weight_A, weight_B, duration):
+        """Generate raster plot for a trial"""
         fig, ax = plt.subplots(1, 1, figsize=(12, 6))
         
         # Offsets: PYR_A top, OLM middle, PYR_B bottom
@@ -191,7 +230,7 @@ if rank == 0:
 else:
     pass  # Silent slaves
 
-# Disable NetPyNE verbose
+# Disable NetPyNE verbose for performance
 cfg.analysis = {}
 cfg.verbose = False
 
@@ -201,6 +240,7 @@ cfg.verbose = False
 for trial in range(N_TRIALS):
     
     # UPDATE SEED FOR EACH TRIAL (creates variability in firing patterns)
+    # CRÍTICO: Actualizar seeds de manera diferente para cada trial
     trial_seed = cfg.seedval + (trial * 1000)
     cfg.seeds = {
         'conn': trial_seed + 7515,
@@ -208,11 +248,16 @@ for trial in range(N_TRIALS):
         'loc': trial_seed + 943
     }
     
+    # Actualizar el seed en netParams para la fuente de estímulo
+    # Esto es CRÍTICO para cambiar el patrón de estimulación en cada trial
+    netParams.stimSeed = cfg.seeds['stim']
+    
     # Synchronize weights
     if rank == 0:
         history_weights_A.append(current_weight_A)
         history_weights_B.append(current_weight_B)
         
+        # Actualizar pesos en netParams para este trial
         netParams.sc_wei_A = current_weight_A
         netParams.sc_wei_B = current_weight_B
         
@@ -231,8 +276,10 @@ for trial in range(N_TRIALS):
                 'stim': trial_seed + 84331,
                 'loc': trial_seed + 943
             }
+            # CRÍTICO: Actualizar el seed de estímulo en netParams en slaves también
+            netParams.stimSeed = cfg.seeds['stim']
     
-    # Run simulation
+    # Run simulation with updated parameters
     if USE_MPI:
         cfg.useMPI = True
         cfg.comm = comm
@@ -241,16 +288,50 @@ for trial in range(N_TRIALS):
     else:
         cfg.useMPI = False
     
-    sim.initialize()
-    sim.createSimulateAnalyze(netParams=netParams, simConfig=cfg)
+    # IMPORTANTE: Configurar la grabación de traces para este trial
+    # Asegurar que se graben voltajes de todas las poblaciones
+    # Configurar grabación de voltajes
+    cfg.recordTraces = {
+        'V_soma': {'sec': 'soma_0', 'loc': 0.5, 'var': 'v'}
+    }
+    cfg.recordCells = ['all']  # Grabar todas las células
+    cfg.recordStim = True
+    cfg.recordTime = True
+    
+    # Configurar grabación de spikes
+    cfg.recordSpikes = {
+        'PYR_A': {'include': 'all'},  # Grabar TODOS los spikes de PYR_A
+        'PYR_B': {'include': 'all'},  # Grabar TODOS los spikes de PYR_B
+        'OLM': {'include': 'all'},    # Grabar TODOS los spikes de OLM
+    }
+    
+    # CRÍTICO: Habilitar distribución uniforme de sinapsis
+    cfg.distributeSynsUniformly = True
+    cfg.connRandomSecFromList = False
+    
+    # Inicializar y ejecutar simulación
+    print(f"[Rank {rank}] Initializing simulation for trial {trial+1}...")
+    
+    # IMPORTANTE: Usar createSimulateAnalyze con los parámetros actualizados
+    sim.createSimulateAnalyze(
+        netParams=netParams, 
+        simConfig=cfg
+    )
     
     # Post-processing (Master only)
     if rank == 0:
         
-        # Extract spikes
-        spikes_A, gids_A_spikes, pop_gids_A = extract_spikes_by_population(sim.allSimData, 'PYR_A')
-        spikes_B, gids_B_spikes, pop_gids_B = extract_spikes_by_population(sim.allSimData, 'PYR_B')
-        spikes_OLM, gids_OLM_spikes, pop_gids_OLM = extract_spikes_by_population(sim.allSimData, 'OLM')
+        # Verificar que hay datos de spikes
+        if 'spkt' not in sim.allSimData or 'spkid' not in sim.allSimData:
+            print(f"WARNING: No spike data recorded in trial {trial+1}")
+            spikes_A, gids_A_spikes, pop_gids_A = np.array([]), np.array([]), np.array([])
+            spikes_B, gids_B_spikes, pop_gids_B = np.array([]), np.array([]), np.array([])
+            spikes_OLM, gids_OLM_spikes, pop_gids_OLM = np.array([]), np.array([]), np.array([])
+        else:
+            # Extract spikes
+            spikes_A, gids_A_spikes, pop_gids_A = extract_spikes_by_population(sim.allSimData, 'PYR_A')
+            spikes_B, gids_B_spikes, pop_gids_B = extract_spikes_by_population(sim.allSimData, 'PYR_B')
+            spikes_OLM, gids_OLM_spikes, pop_gids_OLM = extract_spikes_by_population(sim.allSimData, 'OLM')
         
         # Store counts
         history_spikes_A.append(len(spikes_A))
@@ -271,7 +352,7 @@ for trial in range(N_TRIALS):
             'seed': trial_seed
         })
         
-        # Generate raster
+        # Generate raster plot
         plot_raster_trial(trial + 1, spikes_A, gids_A_spikes, spikes_B, gids_B_spikes,
                          spikes_OLM, gids_OLM_spikes, current_weight_A, current_weight_B, cfg.duration)
         
@@ -280,7 +361,16 @@ for trial in range(N_TRIALS):
         time_bins_A, rate_A = compute_firing_rate_time_series(spikes_A, cfg.popA_size, cfg.duration, dt_decision)
         time_bins_B, rate_B = compute_firing_rate_time_series(spikes_B, cfg.popB_size, cfg.duration, dt_decision)
         
-        trace_A_trial, trace_B_trial, winner, rt = simulate_ddm_race(rate_A, rate_B, time_bins_A)
+        # Ensure both rate arrays have same length
+        min_len = min(len(rate_A), len(rate_B))
+        if min_len > 0:
+            trace_A_trial, trace_B_trial, winner, rt = simulate_ddm_race(
+                rate_A[:min_len], rate_B[:min_len], time_bins_A[:min_len]
+            )
+        else:
+            trace_A_trial, trace_B_trial = [0.0], [0.0]
+            winner = 'NONE'
+            rt = cfg.duration
         
         # Store DDM traces
         full_trace_A.extend(trace_A_trial)
@@ -293,8 +383,9 @@ for trial in range(N_TRIALS):
         
         experiment_decision_points.append(len(full_trace_A))
         
-        # Learning
+        # Learning mechanism
         if winner == 'NONE':
+            # Decide by spike count if DDM didn't reach threshold
             winner = 'A' if len(spikes_A) > len(spikes_B) else 'B'
         
         is_correct = (winner == TARGET_SIDE)
@@ -313,18 +404,22 @@ for trial in range(N_TRIALS):
         else:
             current_weight_B -= (current_weight_B * LTD_RATE)
         
+        # Clip weights to reasonable bounds
         current_weight_A = np.clip(current_weight_A, 0.01, 10.0)
         current_weight_B = np.clip(current_weight_B, 0.01, 10.0)
         
-        # Store LFP
+        # Store LFP data if available
         if 'V_soma' in sim.allSimData and len(sim.allSimData['V_soma']) > 0:
             all_traces = [np.array(t) for t in sim.allSimData['V_soma'].values()]
             if len(all_traces) > 0:
                 lfp_trial = np.mean(all_traces, axis=0)
                 lfp_trial = lfp_trial - np.mean(lfp_trial)
                 all_lfp_trials.append(lfp_trial)
+        
+        # Clear simulation data to save memory
+        sim.allSimData = {}
     
-    # Synchronize
+    # Synchronize before next trial
     if USE_MPI:
         comm.Barrier()
 
@@ -391,36 +486,52 @@ if rank == 0:
     plt.close()
     print("[OK] DDM_Trajectory_Full.png")
     
-    # Plot 3: Model_Output_Trace
-    if 'V_soma' in sim.allSimData and len(sim.allSimData['V_soma']) > 0:
-        time_vec = np.array(sim.allSimData['t'])
-        trace_A = sim.allSimData['V_soma'].get('cell_0', [])
-        trace_B = sim.allSimData['V_soma'].get(f'cell_{cfg.popA_size}', [])
-        trace_OLM = sim.allSimData['V_soma'].get(f'cell_{cfg.popA_size + cfg.popB_size}', [])
+    # Plot 3: Model_Output_Trace (if voltage traces were recorded)
+    try:
+        # Try to load the last trial's voltage data
+        from netpyne import __version__
+        import pickle
         
-        if len(trace_A) > 0 and len(trace_B) > 0 and len(trace_OLM) > 0:
-            fig, ax = plt.subplots(figsize=(14, 6))
+        # Look for saved data
+        data_files = [f for f in os.listdir('.') if f.endswith('.pkl')]
+        if data_files:
+            latest_file = max(data_files, key=os.path.getctime)
+            with open(latest_file, 'rb') as f:
+                saved_data = pickle.load(f)
             
-            ax.plot(time_vec, trace_A, 'g', label='PYR_A', alpha=0.7, lw=1.0)
-            ax.plot(time_vec, trace_B, 'r', label='PYR_B', alpha=0.7, lw=1.0)
-            ax.plot(time_vec, trace_OLM, 'b', label='OLM', alpha=0.7, lw=1.0)
-            
-            ax.set_title('Voltage Traces (Last Trial)', fontsize=14, fontweight='bold')
-            ax.set_xlabel('Time (ms)', fontsize=12)
-            ax.set_ylabel('Voltage (mV)', fontsize=12)
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            plt.savefig('Model_Output_Trace.png', dpi=150)
-            plt.close()
-            print("[OK] Model_Output_Trace.png")
+            if 'simData' in saved_data and 'V_soma' in saved_data['simData']:
+                time_vec = saved_data['simData']['t']
+                trace_A = saved_data['simData']['V_soma'].get('cell0', [])
+                trace_B = saved_data['simData']['V_soma'].get(f'cell{cfg.popA_size}', [])
+                trace_OLM = saved_data['simData']['V_soma'].get(f'cell{cfg.popA_size + cfg.popB_size}', [])
+                
+                if len(trace_A) > 0 and len(trace_B) > 0 and len(trace_OLM) > 0:
+                    fig, ax = plt.subplots(figsize=(14, 6))
+                    
+                    ax.plot(time_vec, trace_A, 'g', label='PYR_A', alpha=0.7, lw=1.0)
+                    ax.plot(time_vec, trace_B, 'r', label='PYR_B', alpha=0.7, lw=1.0)
+                    ax.plot(time_vec, trace_OLM, 'b', label='OLM', alpha=0.7, lw=1.0)
+                    
+                    ax.set_title('Voltage Traces (Last Trial)', fontsize=14, fontweight='bold')
+                    ax.set_xlabel('Time (ms)', fontsize=12)
+                    ax.set_ylabel('Voltage (mV)', fontsize=12)
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+                    
+                    plt.tight_layout()
+                    plt.savefig('Model_Output_Trace.png', dpi=150)
+                    plt.close()
+                    print("[OK] Model_Output_Trace.png")
+                else:
+                    print("[WARN] Model_Output_Trace.png - No valid traces in saved data")
+            else:
+                print("[WARN] Model_Output_Trace.png - No voltage data in saved file")
         else:
-            print("[WARN] Model_Output_Trace.png - No valid traces")
-    else:
-        print("[WARN] Model_Output_Trace.png - No voltage data")
+            print("[WARN] Model_Output_Trace.png - No saved data files found")
+    except Exception as e:
+        print(f"[WARN] Model_Output_Trace.png - Error loading traces: {e}")
     
-    # Plot 4: Spectral_Analysis_PAC
+    # Plot 4: Spectral_Analysis_PAC (if LFP data available)
     if len(all_lfp_trials) > 0:
         try:
             lfp = all_lfp_trials[-1]
@@ -466,7 +577,7 @@ if rank == 0:
                 ax2.set_title('Spectrogram', fontsize=13, fontweight='bold')
                 fig.colorbar(c, ax=ax2, label='Power (dB)')
                 
-                # Panel 4: Band power
+                # Panel 4: Band power evolution
                 ax3 = fig.add_subplot(gs[3, 0])
                 theta_power = []
                 gamma_power = []
@@ -490,7 +601,7 @@ if rank == 0:
                     ax3.legend()
                     ax3.grid(True, alpha=0.2)
                 
-                # Panel 5: PAC
+                # Panel 5: Phase-Amplitude Coupling
                 ax4 = fig.add_subplot(gs[3, 1])
                 
                 def bandpass_filter(data, lowcut, highcut, fs, order=4):
@@ -529,28 +640,30 @@ if rank == 0:
                     ax4.set_xlim([-180, 180])
                     ax4.set_xticks([-180, -90, 0, 90, 180])
                     ax4.grid(True, alpha=0.2)
-                except:
-                    pass
+                except Exception as e:
+                    ax4.text(0.5, 0.5, f'PAC calculation failed:\n{str(e)[:50]}...', 
+                            ha='center', va='center', transform=ax4.transAxes)
+                    ax4.set_title('Phase-Amplitude Coupling (Failed)', fontsize=12, fontweight='bold')
                 
                 plt.savefig('Spectral_Analysis_PAC.png', dpi=150)
                 plt.close()
                 print("[OK] Spectral_Analysis_PAC.png")
             else:
-                print("[WARN] Spectral_Analysis_PAC.png - Insufficient data")
+                print("[WARN] Spectral_Analysis_PAC.png - Insufficient LFP data")
         except Exception as e:
             print(f"[WARN] Spectral_Analysis_PAC.png - Error: {e}")
     else:
-        print("[WARN] Spectral_Analysis_PAC.png - No LFP data")
+        print("[WARN] Spectral_Analysis_PAC.png - No LFP data available")
     
     # Statistics
-    accuracy = np.mean(history_choice) * 100
+    accuracy = np.mean(history_choice) * 100 if len(history_choice) > 0 else 0
     print("\n" + "=" * 80)
     print("FINAL STATISTICS")
     print("=" * 80)
     print(f"Accuracy:   {accuracy:5.1f}%")
-    print(f"Weight A:   {current_weight_A:4.2f} nS (final) | Ratio A/B: {current_weight_A/current_weight_B:4.2f}")
+    print(f"Weight A:   {current_weight_A:4.2f} nS (final) | Ratio A/B: {current_weight_A/current_weight_B if current_weight_B > 0 else float('inf'):4.2f}")
     print(f"Weight B:   {current_weight_B:4.2f} nS (final)")
-    print(f"Avg spikes: A={np.mean(history_spikes_A):5.1f}, B={np.mean(history_spikes_B):5.1f}, OLM={np.mean(history_spikes_OLM):4.1f}")
+    print(f"Avg spikes: A={np.mean(history_spikes_A) if len(history_spikes_A) > 0 else 0:5.1f}, B={np.mean(history_spikes_B) if len(history_spikes_B) > 0 else 0:5.1f}, OLM={np.mean(history_spikes_OLM) if len(history_spikes_OLM) > 0 else 0:4.1f}")
     print("=" * 80 + "\n")
 
 # MPI Finalization

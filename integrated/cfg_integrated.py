@@ -3,6 +3,7 @@
 """
 Integrated Configuration: CA1 Model + Decision Making
 CRITICAL FIX: Removed synaptic depression to enable sustained OLM activity
+ADDED: Fixed recording configuration and trial management
 """
 
 from netpyne import specs
@@ -122,27 +123,61 @@ cfg.sc_input_rate = 34          # Paper
 cfg.sc_input_noise = 0.5        
 
 # =============================================================================
-# RECORDING CONFIGURATION
+# RECORDING CONFIGURATION - FIXED
 # =============================================================================
-cfg.distributeSynsUniformly = False
+# CRITICAL: Habilitar distribución uniforme de sinapsis
+cfg.distributeSynsUniformly = True
 cfg.connRandomSecFromList = False
 
+# FIXED: Configuración mejorada de grabación
+# Grabar de todas las poblaciones, no solo algunas
+cfg.recordCells = ['all']  # Grabar todas las células
+
+# FIXED: Definir qué traces grabar
 cfg.recordTraces = {
-    'V_soma': {'sec': 'soma_0', 'loc': 0.5, 'var': 'v'}
+    'V_soma': {
+        'sec': 'soma_0', 
+        'loc': 0.5, 
+        'var': 'v'
+    },
+    # Opcional: agregar más traces si es necesario
+    # 'V_dend': {'sec': 'apic_0', 'loc': 0.5, 'var': 'v'},
 }
 
-cfg.recordStim = False
-cfg.recordTime = True
+# FIXED: Asegurar que se graban spikes
+cfg.recordSpikes = {
+    'PYR_A': {'include': 'all'},  # Grabar todos los spikes de PYR_A
+    'PYR_B': {'include': 'all'},  # Grabar todos los spikes de PYR_B
+    'OLM': {'include': 'all'},    # Grabar todos los spikes de OLM
+}
 
+cfg.recordStim = True  # Grabar estímulos
+cfg.recordTime = True  # Grabar tiempos
+cfg.recordStep = 0.1   # Resolución de grabación (puedes ajustar)
+
+# Configuración de guardado
 cfg.savePickle = True
 cfg.saveJson = False
 cfg.saveMat = False
 cfg.saveFileStep = 1000
 
-cfg.analysis = {}
+# =============================================================================
+# ANÁLISIS - FIXED
+# =============================================================================
+cfg.analysis = {
+    'plotRaster': {'saveFig': True, 'showFig': False},
+    'plotTraces': {'include': [0, 5, 10, 15], 'saveFig': True, 'showFig': False},
+    'plot2Dnet': {'saveFig': True, 'showFig': False}
+}
 
 # =============================================================================
 # ALVEAR STIMULATION (Deactivated)
 # =============================================================================
 cfg.doAlvstim = False
 cfg.doAlvPYRclamp = False
+
+# =============================================================================
+# PARÁMETROS ADICIONALES PARA CONTROL DE TRIALS - NUEVO
+# =============================================================================
+cfg.trialDuration = 1000.0  # Duración de cada trial
+cfg.interTrialInterval = 100.0  # Intervalo entre trials (opcional)
